@@ -164,18 +164,15 @@ void odom_timer_callback(rcl_timer_t * odom_timer, int64_t last_call_time) {
   RCLC_UNUSED(last_call_time);
   static rcl_time_point_value_t last_time;
   rcl_time_point_value_t now_time;
-  // 現在の時間を取得
   rcl_clock_t clock;
   RCCHECK(rcl_clock_init(RCL_ROS_TIME, &clock, &allocator));
-
   RCCHECK(rcl_clock_get_now(&clock, &now_time));
 
   if (odom_timer != NULL) {
-    // 速度情報
     double vx = 0.0;
     double vy = 0.0;
     double vtheta = 0.0;
-    // buffur clear
+
     while(DXL_SERIAL.available() > 0){
       DXL_SERIAL.read();
     }
@@ -185,7 +182,6 @@ void odom_timer_callback(rcl_timer_t * odom_timer, int64_t last_call_time) {
     delay(5);
     debug_message("got motor pos r = %ld l = %ld", r_cur_pos, l_cur_pos);
 
-    // エンコーダのカウント差分を計算
     int32_t delta_left = l_cur_pos - l_motor_pos;
     int32_t delta_right = r_cur_pos - r_motor_pos;
 
@@ -209,18 +205,15 @@ void odom_timer_callback(rcl_timer_t * odom_timer, int64_t last_call_time) {
       return;
     }
 
-    // 前の位置を更新
     l_motor_pos = l_cur_pos;
     r_motor_pos = r_cur_pos;
 
-    double dt = (now_time - last_time) / 1e9;  // 秒に変換
+    double dt = (now_time - last_time) / 1e9;
     last_time = now_time;
     debug_message("dt = %lf", dt);
 
-    // オドメトリを更新
     update_odometry(delta_left, delta_right, dt, odom_x, odom_y, odom_theta, vx, vtheta);
 
-    // オドメトリメッセージを作成
     odom_msg.pose.pose.position.x = odom_x;
     odom_msg.pose.pose.position.y = odom_y;
     odom_msg.pose.pose.orientation.z = sin(odom_theta / 2.0);
@@ -229,10 +222,27 @@ void odom_timer_callback(rcl_timer_t * odom_timer, int64_t last_call_time) {
     odom_msg.twist.twist.angular.z = vtheta;
 
     debug_message("publish odometry");
-    // オドメトリをパブリッシュ
     RCSOFTCHECK(rcl_publish(&odom_publisher, &odom_msg, NULL));
+
+    // TFメッセージの設定
+    odom_to_base_link.header.stamp = now_time;
+    odom_to_base_link.header.frame_id = "odom";
+    odom_to_base_link.child_frame_id = "base_link";
+
+    odom_to_base_link.transform.translation.x = odom_x;
+    odom_to_base_link.transform.translation.y = odom_y;
+    odom_to_base_link.transform.translation.z = 0.0;
+
+    odom_to_base_link.transform.rotation.x = 0.0;
+    odom_to_base_link.transform.rotation.y = 0.0;
+    odom_to_base_link.transform.rotation.z = sin(odom_theta / 2.0);
+    odom_to_base_link.transform.rotation.w = cos(odom_theta / 2.0);
+
+    // TFブロードキャスト
+    tf_broadcaster.sendTransform(odom_to_base_link);
   }
 }
+
 
 void twist_callback(const void * msgin)
 {
